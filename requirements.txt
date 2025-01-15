@@ -55,12 +55,10 @@ mitmproxy-macos==0.5.2
 mitmproxy_rs==0.5.2
 msgpack==1.0.8
 multidict==6.1.0
-numexpr @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/numexpr_1699237935415/work
-numpy @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_cfbbnu3tzv/croot/numpy_and_numpy_base_1704311724719/work/dist/numpy-1.26.3-cp312-cp312-macosx_11_0_arm64.whl#sha256=e066d59974be230052477e95f2633cdef4c4987c2f32c15291d3f4b184022bdc
+numpy
 openpyxl==3.1.2
 packaging==24.2
-pandas @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_82r7p4atwy/croot/pandas_1702318000240/work/dist/pandas-2.1.4-cp312-cp312-macosx_11_0_arm64.whl#sha256=142530670b1e4125a2466ecf7521689e9e72ac90d1e53a96b5ce39180a797870
-paramiko @ file:///opt/conda/conda-bld/paramiko_1640109032755/work
+pandas
 passlib==1.7.4
 pillow==11.1.0
 playsound==1.3.0
@@ -72,12 +70,10 @@ publicsuffix2==2.20191221
 py==1.11.0
 pyasn1==0.6.0
 pyasn1_modules==0.4.0
-pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
 pydantic==2.5.3
 pydantic_core==2.14.6
 pylsqpack==0.3.18
 PyMySQL==1.1.0
-PyNaCl @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/pynacl_1699261347864/work
 pyobjc==10.3.1
 pyobjc-core==10.3.1
 pyobjc-framework-Accessibility==10.3.1
@@ -240,11 +236,10 @@ pytest-item-dict==1.1.2
 pytest-metadata==3.1.1
 pytest-repeat==0.9.3
 pytest-xml==0.1.1
-python-dateutil @ file:///tmp/build/80754af9/python-dateutil_1626374649649/work
+python-dateutil
 python-docx==1.1.2
-pytz @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/pytz_1699238107851/work
+pytz
 pyzmq==26.2.0
-redis @ file:///Users/ktietz/demo/mc3/conda-bld/redis_1629466498261/work
 requests==2.32.3
 requests-futures==1.0.1
 ruamel.yaml==0.18.6
@@ -252,7 +247,7 @@ ruamel.yaml.clib==0.2.8
 service-identity==24.1.0
 setuptools==75.6.0
 simplejson==3.19.3
-six @ file:///tmp/build/80754af9/six_1644875935023/work
+six
 sniffio==1.3.0
 sortedcontainers==2.4.0
 soupsieve==2.6
@@ -261,7 +256,7 @@ tornado==6.4
 tqdm==4.67.1
 tushare==1.4.14
 typing_extensions==4.9.0
-tzdata @ file:///croot/python-tzdata_1690578112552/work
+tzdata
 urllib3==2.1.0
 urwid-mitmproxy==2.1.2.1
 uvicorn==0.26.0
