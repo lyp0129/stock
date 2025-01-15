@@ -8,14 +8,11 @@ annotated-types==0.6.0
 anyio==4.2.0
 asgiref==3.8.1
 attrs==23.2.0
-bcrypt @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/bcrypt_1699241940700/work
 beautifulsoup4==4.12.3
 blinker==1.8.1
-Bottleneck @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/bottleneck_1699237772214/work
 Brotli==1.1.0
 bs4==0.0.2
 certifi==2023.11.17
-cffi @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_b4nang6w_y/croot/cffi_1700254307954/work
 charset-normalizer==3.3.2
 chinadata==0.0.6
 click==8.1.7
