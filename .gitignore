@@ -7,5 +7,9 @@ env/
 venv/
 .env
 .venv
-*.csv
 .DS_Store
+# PyCharm
+.idea/
+# pip
+pip-log.txt
+pip-delete-this-directory.txt
