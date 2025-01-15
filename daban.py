@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# coding: utf-8
+
 import tushare as ts
 import pandas as pd
 import numpy as np
@@ -85,9 +88,63 @@ class StockMonitor:
             print(f"获取{ts_code}分钟数据失败: {str(e)}")
         return None
 
+    def is_trading_time(self):
+        """判断当前是否为交易时间"""
+        now = datetime.now().time()
+        
+        # 定义交易时间段
+        morning_start = datetime.strptime('09:30:00', '%H:%M:%S').time()
+        morning_end = datetime.strptime('11:30:00', '%H:%M:%S').time()
+        afternoon_start = datetime.strptime('13:00:00', '%H:%M:%S').time()
+        afternoon_end = datetime.strptime('21:00:00', '%H:%M:%S').time()
+        
+        # 判断是否在交易时间内
+        is_morning_trading = morning_start <= now <= morning_end
+        is_afternoon_trading = afternoon_start <= now <= afternoon_end
+        
+        return is_morning_trading or is_afternoon_trading
+
     def monitor(self, interval=1):
+        """修改监控函数，添加交易时间判断和开盘提醒"""
+        last_status = False  # 记录上一次的交易状态
+        
         while True:
             try:
+                current_status = self.is_trading_time()
+                
+                # 检测是否刚开盘（状态从非交易变为交易）
+                if current_status and not last_status:
+                    current_time = datetime.now().strftime('%H:%M:%S')
+                    print(f"\n市场开盘了！当前时间: {current_time}")
+                    
+                    # 发送飞书通知
+                    message = (f"🔔 股票市场开盘提醒\n"
+                              f"当前时间: {current_time}\n"
+                              f"监控股票数量: {len(self.stock_list)}")
+                    
+                    data = {
+                        "msg_type": "text",
+                        "content": {
+                            "text": message
+                        }
+                    }
+                    try:
+                        response = requests.post(self.feishu_webhook, json=data)
+                        if response.status_code != 200:
+                            print(f"发送飞书消息失败: {response.text}")
+                    except Exception as e:
+                        print(f"发送飞书消息异常: {str(e)}")
+                
+                # 更新状态
+                last_status = current_status
+                
+                # 非交易时间处理
+                if not current_status:
+                    current_time = datetime.now().strftime('%H:%M:%S')
+                    print(f"\r当前时间 {current_time} 不在交易时间内，等待中...", end='')
+                    time.sleep(60)  # 非交易时间每分钟检查一次
+                    continue
+                    
                 # 使用线程池并行获取数据
                 with ThreadPoolExecutor(max_workers=5) as executor:
                     futures = []
