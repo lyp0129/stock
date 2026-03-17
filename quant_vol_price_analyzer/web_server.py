@@ -85,7 +85,7 @@ def api_analyze():
                 'description': result['description'],
                 'position': result['position'],
                 'trend': result['trend'],
-                'is_chasing': result['is_chasing'],
+                'is_chasing': bool(result['is_chasing']),
                 'vol_ratio': f"{result['vol_ratio']:.2f}",
                 'resistance': f"{result['resistance']:.2f}",
                 'support': f"{result['support']:.2f}",
