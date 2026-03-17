@@ -162,6 +162,12 @@ class VolPriceAnalyzer:
 
             if df is not None and not df.empty:
                 current_price = float(df.iloc[0]['price'])
+
+                # BUG修复：价格保护，防止返回0或负数
+                if current_price <= 0:
+                    print(f"警告: 获取到无效价格 {current_price}，将使用日线数据")
+                    return None, None
+
                 open_price = float(df.iloc[0]['open'])
                 pre_close = float(df.iloc[0]['pre_close']) if 'pre_close' in df.columns else open_price
 
@@ -273,7 +279,7 @@ class VolPriceAnalyzer:
         return vol_map[vol_status] + price_map[price_status]
 
     def analyze_position(self, df: pd.DataFrame) -> str:
-        """判断股票位置（优化版：使用 120 日区间）
+        """判断股票位置（优化版：使用 120 日区间 + 趋势股判断）
 
         Args:
             df: 股票数据 DataFrame
@@ -297,6 +303,13 @@ class VolPriceAnalyzer:
             return '中位'
 
         position = (current_price - min_price) / price_range
+
+        # 优化3：添加趋势股高位判断（防止趋势股一直被判中位）
+        if len(df) >= 60:
+            ma60 = df['close'].rolling(60).mean().iloc[-1]
+            if not pd.isna(ma60) and current_price > ma60 * 1.3:
+                # 价格超过MA60的30%，强制判为高位
+                return '高位'
 
         # 更严格的阈值（80% 和 20%）
         if position > 0.8:
@@ -455,20 +468,22 @@ class VolPriceAnalyzer:
         if action_code == 2:  # 买入
             buy_price = current_price
             # v2.1 升级：根据趋势调整止损
+            # 优化2：使用min避免高位震荡时止损过高
             if trend == TrendType.UPTREND:
                 # 上升趋势：宽松止损（ATR*2.5）
-                stop_loss = max(support * 0.97, current_price - atr * 2.5)
+                stop_loss = min(support * 0.97, current_price - atr * 2.5)
             elif trend == TrendType.DOWNTREND:
                 # 下降趋势：严格止损（ATR*1.5）
-                stop_loss = max(support * 0.98, current_price - atr * 1.5)
+                stop_loss = min(support * 0.98, current_price - atr * 1.5)
             else:
                 # 震荡：标准止损（ATR*2）
-                stop_loss = max(support * 0.97, current_price - atr * 2)
+                stop_loss = min(support * 0.97, current_price - atr * 2)
             # 返回第一个目标价
             target = target1
         elif action_code == 3:  # 卖出/减仓（持有状态）
             buy_price = current_price
-            stop_loss = max(support * 0.97, current_price * 0.95, current_price - atr * 2)
+            # 优化2：使用min避免高位震荡时止损过高
+            stop_loss = min(support * 0.97, current_price * 0.95, current_price - atr * 2)
             target = target1  # 第一目标价
         else:  # 观望/空仓
             if position == '低位':
@@ -513,13 +528,14 @@ class VolPriceAnalyzer:
 
         return atr
 
-    def analyze(self, ts_code: str, shares: int = 0, cost: float = 0.0) -> Dict:
+    def analyze(self, ts_code: str, shares: int = 0, cost: float = 0.0, market_status=None) -> Dict:
         """分析股票量价关系（v2.2 升级版：市场环境过滤 + 优化追高逻辑）
 
         Args:
             ts_code: 股票代码（如 000001.SZ）
             shares: 持有股数
             cost: 成本价
+            market_status: 市场状态（可选，用于批量扫描时避免重复计算）
 
         Returns:
             分析结果字典
@@ -553,8 +569,9 @@ class VolPriceAnalyzer:
         # v2.1 升级：检查是否追高
         is_chasing = self.is_chasing_high(df)
 
-        # v2.2 升级：分析市场环境
-        market_status = self.analyze_market_environment()
+        # v2.2 升级：分析市场环境（性能优化：如果已提供则复用，避免重复请求）
+        if market_status is None:
+            market_status = self.analyze_market_environment()
 
         # 获取配置
         config = self.VOL_PRICE_CONFIG[pattern]
@@ -772,6 +789,10 @@ class VolPriceAnalyzer:
         """
         print(f"\n开始扫描市场，寻找 {pattern} 形态股票...")
 
+        # BUG修复：在扫描前获取一次市场状态，避免重复请求
+        market_status = self.analyze_market_environment()
+        print(f"市场环境: {market_status.value}")
+
         # 获取所有股票列表
         stock_list = self.pro.stock_basic(
             exchange='',
@@ -791,9 +812,9 @@ class VolPriceAnalyzer:
 
         results = []
 
-        # 使用线程池并发分析
+        # 使用线程池并发分析（传入market_status避免重复计算）
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(self._analyze_single, code): code for code in codes}
+            futures = {executor.submit(self._analyze_single, code, market_status): code for code in codes}
 
             for i, future in enumerate(as_completed(futures), 1):
                 if i % 100 == 0:
@@ -814,17 +835,18 @@ class VolPriceAnalyzer:
         print(f"\n扫描完成！发现 {len(results)} 只符合条件的股票")
         return results
 
-    def _analyze_single(self, ts_code: str) -> Optional[Dict]:
+    def _analyze_single(self, ts_code: str, market_status) -> Optional[Dict]:
         """分析单只股票（用于并发扫描）
 
         Args:
             ts_code: 股票代码
+            market_status: 市场状态（复用，避免重复计算）
 
         Returns:
             分析结果字典
         """
         try:
-            return self.analyze(ts_code)
+            return self.analyze(ts_code, market_status=market_status)
         except:
             return None
 
