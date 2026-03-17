@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>股票量价分析</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px 15px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #555;
+            font-size: 14px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 6px;
+        }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .result {
+            display: none;
+        }
+
+        .result.show {
+            display: block;
+        }
+
+        .stock-header {
+            text-align: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 16px;
+        }
+
+        .stock-name {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .stock-code {
+            font-size: 14px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .price-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .current-price {
+            font-size: 32px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .price-change {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .price-change.positive {
+            color: #f56565;
+        }
+
+        .price-change.negative {
+            color: #48bb78;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #f5f5f5;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .info-value {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .action-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px;
+            border-radius: 10px;
+            text-align: center;
+            margin: 16px 0;
+        }
+
+        .action-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .action-desc {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+        .targets {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .target-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .target-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 13px;
+        }
+
+        .target-label {
+            color: #666;
+        }
+
+        .target-price {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .holding-info {
+            background: #fff3cd;
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .holding-profit {
+            text-align: center;
+            font-size: 24px;
+            font-weight: 700;
+            margin-top: 12px;
+        }
+
+        .holding-profit.positive {
+            color: #f56565;
+        }
+
+        .holding-profit.negative {
+            color: #48bb78;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #999;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 14px;
+            text-align: center;
+            display: none;
+        }
+
+        .error.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>📈 股票量价分析</h1>
+
+            <form id="analyzeForm">
+                <div class="form-group">
+                    <label for="code">股票代码 *</label>
+                    <input type="text" id="code" name="code" placeholder="如: 300569 或 600519" required>
+                    <div class="hint">支持输入数字代码，自动识别交易所</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="shares">持股数（可选）</label>
+                    <input type="number" id="shares" name="shares" placeholder="如: 2500" min="0">
+                    <div class="hint">填写后可查看持仓盈亏</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="cost">成本价（可选）</label>
+                    <input type="number" id="cost" name="cost" placeholder="如: 8.317" min="0" step="0.001">
+                    <div class="hint">填写后可查看持仓盈亏</div>
+                </div>
+
+                <button type="submit" id="submitBtn">开始分析</button>
+            </form>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <div>分析中...</div>
+            </div>
+
+            <div class="error" id="error"></div>
+        </div>
+
+        <div class="card result" id="result">
+            <div class="stock-header">
+                <div class="stock-name" id="stockName">-</div>
+                <div class="stock-code" id="stockCode">-</div>
+            </div>
+
+            <div class="price-section">
+                <div class="current-price" id="currentPrice">-</div>
+                <div class="price-change" id="priceChange">-</div>
+            </div>
+
+            <div class="action-box">
+                <div class="action-title" id="actionTitle">-</div>
+                <div class="action-desc" id="actionDesc">-</div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">量价形态</span>
+                <span class="info-value" id="pattern">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">所处位置</span>
+                <span class="info-value" id="position">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">趋势状态</span>
+                <span class="info-value" id="trend">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">量比</span>
+                <span class="info-value" id="volRatio">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">20日阻力位</span>
+                <span class="info-value" id="resistance">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">60日支撑位</span>
+                <span class="info-value" id="support">-</span>
+            </div>
+
+            <div class="targets">
+                <div class="target-title">🎯 分批止盈策略</div>
+                <div class="target-item">
+                    <span class="target-label">第一目标（卖50%）</span>
+                    <span class="target-price" id="target1">-</span>
+                </div>
+                <div class="target-item">
+                    <span class="target-label">第二目标（卖30%）</span>
+                    <span class="target-price" id="target2">-</span>
+                </div>
+                <div class="target-item">
+                    <span class="target-label">第三目标（卖20%底仓）</span>
+                    <span class="target-price" id="target3">-</span>
+                </div>
+                <div class="target-item" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e0e0e0;">
+                    <span class="target-label">建议止损</span>
+                    <span class="target-price" id="stopLoss" style="color: #f56565;">-</span>
+                </div>
+            </div>
+
+            <div class="holding-info" id="holdingInfo" style="display: none;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">💼 持仓分析</div>
+                <div class="info-row">
+                    <span class="info-label">持股数</span>
+                    <span class="info-value" id="holdingShares">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">成本价</span>
+                    <span class="info-value" id="holdingCost">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">当前市值</span>
+                    <span class="info-value" id="marketValue">-</span>
+                </div>
+                <div class="holding-profit" id="profitLoss">-</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('analyzeForm');
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
+        const result = document.getElementById('result');
+        const submitBtn = document.getElementById('submitBtn');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(form);
+
+            // 显示加载状态
+            loading.classList.add('show');
+            error.classList.remove('show');
+            result.classList.remove('show');
+            submitBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayResult(data.data);
+                } else {
+                    showError(data.error || '分析失败，请重试');
+                }
+            } catch (err) {
+                showError('网络错误，请检查连接');
+            } finally {
+                loading.classList.remove('show');
+                submitBtn.disabled = false;
+            }
+        });
+
+        function displayResult(data) {
+            // 基本信息
+            document.getElementById('stockName').textContent = data.stock_name;
+            document.getElementById('stockCode').textContent = data.ts_code;
+            document.getElementById('currentPrice').textContent = data.current_price;
+
+            // 涨跌幅
+            const priceChange = document.getElementById('priceChange');
+            priceChange.textContent = data.change_pct;
+            priceChange.className = 'price-change ' + (data.change_pct.startsWith('+') ? 'positive' : 'negative');
+
+            // 操作建议
+            document.getElementById('actionTitle').textContent = data.action;
+            document.getElementById('actionDesc').textContent = data.description;
+
+            // 分析数据
+            document.getElementById('pattern').textContent = data.pattern;
+            document.getElementById('position').textContent = data.position;
+            document.getElementById('trend').textContent = data.trend;
+            document.getElementById('volRatio').textContent = data.vol_ratio;
+            document.getElementById('resistance').textContent = data.resistance;
+            document.getElementById('support').textContent = data.support;
+
+            // 目标价
+            document.getElementById('target1').textContent = data.target1;
+            document.getElementById('target2').textContent = data.target2;
+            document.getElementById('target3').textContent = data.target3;
+            document.getElementById('stopLoss').textContent = data.stop_loss;
+
+            // 持仓信息
+            if (data.holding) {
+                document.getElementById('holdingInfo').style.display = 'block';
+                document.getElementById('holdingShares').textContent = data.holding.shares;
+                document.getElementById('holdingCost').textContent = data.holding.cost;
+                document.getElementById('marketValue').textContent = data.holding.market_value;
+
+                const profitLoss = document.getElementById('profitLoss');
+                profitLoss.textContent = data.holding.profit_loss + ' (' + data.holding.profit_loss_pct + ')';
+                profitLoss.className = 'holding-profit ' + (data.holding.profit_loss.startsWith('+') ? 'positive' : 'negative');
+            } else {
+                document.getElementById('holdingInfo').style.display = 'none';
+            }
+
+            result.classList.add('show');
+        }
+
+        function showError(message) {
+            error.textContent = message;
+            error.classList.add('show');
+        }
+    </script>
+</body>
+</html>
