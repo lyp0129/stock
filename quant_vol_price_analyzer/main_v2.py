@@ -32,8 +32,15 @@ class TrendType(Enum):
     RANGE = "震荡整理"
 
 
+class MarketStatus(Enum):
+    """市场状态"""
+    BULL = "牛市"
+    BEAR = "熊市"
+    NEUTRAL = "震荡市"
+
+
 class VolPriceAnalyzer:
-    """量价关系分析器 v2.1 - 专业版"""
+    """量价关系分析器 v2.2 - 专业版（加入市场环境过滤）"""
 
     # 量价关系配置
     VOL_PRICE_CONFIG = {
@@ -56,6 +63,30 @@ class VolPriceAnalyzer:
             config_path: 配置文件路径
             proxy_url: API代理地址
         """
+        # 设置默认配置文件路径（尝试多个位置）
+        if config_path is None:
+            # 获取脚本所在目录
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+
+            # 按优先级尝试多个配置文件位置
+            possible_paths = [
+                os.path.join(script_dir, 'config.yaml'),           # 当前目录的 config.yaml
+                os.path.join(script_dir, 'config.prod.yaml'),      # 当前目录的 config.prod.yaml
+                os.path.join(script_dir, 'scanner_v4', 'config.yaml'),  # scanner_v4 子目录的 config.yaml
+                os.path.join(os.path.dirname(script_dir), 'config.prod.yaml'),  # 父目录的 config.prod.yaml
+                os.path.join(os.path.dirname(script_dir), 'config.yaml'),  # 父目录的 config.yaml
+            ]
+
+            # 找到第一个存在的配置文件
+            for path in possible_paths:
+                if os.path.exists(path):
+                    config_path = path
+                    break
+
+            # 如果都找不到，使用第一个作为默认值（会报错）
+            if not config_path or not os.path.exists(config_path):
+                config_path = possible_paths[0]
+
         if token:
             ts.set_token(token)
         else:
@@ -113,6 +144,38 @@ class VolPriceAnalyzer:
         """
         return self.stock_map.get(ts_code, ts_code)
 
+    def get_realtime_price(self, ts_code: str) -> Tuple[float, float]:
+        """获取实时价格
+
+        Args:
+            ts_code: 股票代码（如 300569.SZ）
+
+        Returns:
+            (当前价格, 涨跌幅%)
+        """
+        try:
+            # 转换代码格式：300569.SZ -> 300569
+            code = ts_code.split('.')[0]
+
+            # 使用旧版 tushare 接口获取实时行情（不需要 token）
+            df = ts.get_realtime_quotes(code)
+
+            if df is not None and not df.empty:
+                current_price = float(df.iloc[0]['price'])
+                open_price = float(df.iloc[0]['open'])
+                pre_close = float(df.iloc[0]['pre_close']) if 'pre_close' in df.columns else open_price
+
+                if pre_close > 0:
+                    change_pct = ((current_price - pre_close) / pre_close) * 100
+                else:
+                    change_pct = 0.0
+
+                return current_price, change_pct
+        except Exception as e:
+            print(f"警告: 获取实时价格失败 ({e})，将使用日线数据")
+
+        return None, None
+
     def get_stock_data(self, ts_code: str, days: int = 60) -> pd.DataFrame:
         """获取股票历史数据
 
@@ -138,7 +201,7 @@ class VolPriceAnalyzer:
         return df
 
     def analyze_volume_status(self, df: pd.DataFrame) -> Tuple[str, float]:
-        """分析成交量状态（优化版：使用 10 日量比）
+        """分析成交量状态（v2.2升级：使用5日结构判断）
 
         Args:
             df: 股票数据 DataFrame
@@ -146,30 +209,29 @@ class VolPriceAnalyzer:
         Returns:
             ('量平'、'量升' 或 '量缩', 量比)
         """
-        if len(df) < 10:
+        if len(df) < 25:
             return '量平', 1.0
 
-        # 最近一天的成交量
-        recent_vol = df.iloc[-1]['vol']
-        # 前10天平均成交量
-        avg_vol_10 = df.iloc[-11:-1]['vol'].mean()
+        # v2.2升级：使用5日平均成交量 vs 20日平均成交量
+        recent_5_vol = df.iloc[-5:]['vol'].mean()
+        avg_vol_20 = df.iloc[-25:-5]['vol'].mean()
 
-        if avg_vol_10 == 0:
+        if avg_vol_20 == 0:
             return '量平', 1.0
 
-        # 计算量比
-        vol_ratio = recent_vol / avg_vol_10
+        # 计算量比（5日均量 / 20日均量）
+        vol_ratio = recent_5_vol / avg_vol_20
 
         # 判断成交量状态（更稳健的阈值）
-        if vol_ratio > 1.5:
+        if vol_ratio > 1.3:
             return '量升', vol_ratio
-        elif vol_ratio < 0.7:
+        elif vol_ratio < 0.8:
             return '量缩', vol_ratio
         else:
             return '量平', vol_ratio
 
     def analyze_price_status(self, df: pd.DataFrame) -> str:
-        """分析价格状态（优化版：使用 1% 阈值）
+        """分析价格状态（v2.2升级：使用5日趋势判断）
 
         Args:
             df: 股票数据 DataFrame
@@ -177,20 +239,20 @@ class VolPriceAnalyzer:
         Returns:
             '价平'、'价涨' 或 '价跌'
         """
-        if len(df) < 2:
+        if len(df) < 5:
             return '价平'
 
-        # 最近两天的收盘价
-        recent_close = df.iloc[-1]['close']
-        prev_close = df.iloc[-2]['close']
+        # v2.2升级：计算5日累计涨跌幅
+        price_5_days_ago = df.iloc[-6]['close'] if len(df) >= 6 else df.iloc[0]['close']
+        current_price = df.iloc[-1]['close']
 
-        # 计算涨跌幅
-        change_pct = (recent_close - prev_close) / prev_close
+        # 5日累计涨跌幅
+        change_pct_5d = (current_price - price_5_days_ago) / price_5_days_ago
 
-        # 判断价格状态（使用 1% 阈值，减少噪音）
-        if change_pct > 0.01:
+        # 判断价格状态（使用3%阈值，过滤短期噪音）
+        if change_pct_5d > 0.03:
             return '价涨'
-        elif change_pct < -0.01:
+        elif change_pct_5d < -0.03:
             return '价跌'
         else:
             return '价平'
@@ -289,6 +351,47 @@ class VolPriceAnalyzer:
         # 如果当前价格 > 20日阻力位的95%，视为追高
         return current_price > resistance_20 * 0.95
 
+    def analyze_market_environment(self, index_code: str = '000001.SH') -> MarketStatus:
+        """分析市场环境（v2.2新增：上证指数环境判断）
+
+        Args:
+            index_code: 指数代码，默认上证指数
+
+        Returns:
+            MarketStatus 枚举值
+        """
+        try:
+            # 获取上证指数数据
+            df_index = self.pro.daily(ts_code=index_code,
+                                      start_date=(datetime.now() - timedelta(days=120)).strftime('%Y%m%d'),
+                                      end_date=datetime.now().strftime('%Y%m%d'))
+
+            if df_index is None or len(df_index) < 60:
+                return MarketStatus.NEUTRAL
+
+            df_index = df_index.sort_values('trade_date').tail(60)
+
+            # 计算指数MA
+            ma20 = df_index['close'].rolling(20).mean().iloc[-1]
+            ma60 = df_index['close'].rolling(60).mean().iloc[-1]
+            current_price = df_index.iloc[-1]['close']
+
+            # 计算20日涨跌幅
+            price_20_days_ago = df_index.iloc[-21]['close']
+            change_pct_20d = (current_price - price_20_days_ago) / price_20_days_ago
+
+            # 判断市场状态
+            if current_price > ma20 > ma60 and change_pct_20d > 0.05:
+                return MarketStatus.BULL  # 牛市：多头排列且20日涨幅>5%
+            elif current_price < ma20 < ma60 and change_pct_20d < -0.05:
+                return MarketStatus.BEAR  # 熊市：空头排列且20日跌幅<-5%
+            else:
+                return MarketStatus.NEUTRAL  # 震荡市
+
+        except Exception as e:
+            print(f"警告: 获取市场环境失败 ({e})")
+            return MarketStatus.NEUTRAL
+
     def calculate_target_prices(self, df: pd.DataFrame, position: str,
                                action_code: int, pattern: str = '', trend: TrendType = TrendType.RANGE) -> Tuple[float, float, float, float, float, float, float, float]:
         """计算目标买入价、卖出价和止损价（专业版：分批止盈策略）
@@ -298,8 +401,8 @@ class VolPriceAnalyzer:
         - 第二目标：60日阻力位（趋势止盈，卖30%）
         - 第三目标：120日阻力位或突破后15%（主升浪，卖20%）
 
-        v2.1 升级：
-        - 支撑位使用60日低点（更可靠）
+        v2.2 升级：
+        - 支撑位改为MA60均线（避免极端下影线）
         - 根据趋势调整止损策略
 
         Args:
@@ -312,7 +415,7 @@ class VolPriceAnalyzer:
         Returns:
             (买入价, 止损价, 目标价1, 目标价2, 目标价3, 阻力位, 支撑位, ATR)
         """
-        # 计算多周期阻力位和支撑位
+        # 计算多周期阻力位
         recent_20 = df.tail(20)
         recent_60 = df.tail(60)
         recent_120 = df.tail(120) if len(df) >= 120 else df.tail(len(df))
@@ -321,8 +424,9 @@ class VolPriceAnalyzer:
         resistance_60 = recent_60['high'].max()
         resistance_120 = recent_120['high'].max()
 
-        # v2.1 升级：支撑位使用60日低点（更可靠）
-        support = recent_60['low'].min()
+        # v2.2 升级：支撑位改为MA60均线（更可靠，避免极端下影线）
+        ma60 = df['close'].rolling(60).mean().iloc[-1]
+        support = ma60 if not pd.isna(ma60) else recent_60['low'].min()
         current_price = df.iloc[-1]['close']
 
         # 计算ATR（用于动态止损）
@@ -410,7 +514,7 @@ class VolPriceAnalyzer:
         return atr
 
     def analyze(self, ts_code: str, shares: int = 0, cost: float = 0.0) -> Dict:
-        """分析股票量价关系（v2.1 升级版：集成趋势过滤）
+        """分析股票量价关系（v2.2 升级版：市场环境过滤 + 优化追高逻辑）
 
         Args:
             ts_code: 股票代码（如 000001.SZ）
@@ -423,10 +527,16 @@ class VolPriceAnalyzer:
         # 获取股票数据
         df = self.get_stock_data(ts_code)
 
-        # 获取基本信息
-        current_price = df.iloc[-1]['close']
-        prev_price = df.iloc[-2]['close'] if len(df) > 1 else current_price
-        change_pct = (current_price - prev_price) / prev_price * 100
+        # 获取实时价格（如果失败则使用日线数据）
+        realtime_price, realtime_change = self.get_realtime_price(ts_code)
+        if realtime_price is not None:
+            current_price = realtime_price
+            change_pct = realtime_change
+        else:
+            # 降级到日线数据
+            current_price = df.iloc[-1]['close']
+            prev_price = df.iloc[-2]['close'] if len(df) > 1 else current_price
+            change_pct = (current_price - prev_price) / prev_price * 100
 
         # 获取股票名称（从缓存）
         stock_name = self.get_stock_name(ts_code)
@@ -443,6 +553,9 @@ class VolPriceAnalyzer:
         # v2.1 升级：检查是否追高
         is_chasing = self.is_chasing_high(df)
 
+        # v2.2 升级：分析市场环境
+        market_status = self.analyze_market_environment()
+
         # 获取配置
         config = self.VOL_PRICE_CONFIG[pattern]
 
@@ -450,14 +563,18 @@ class VolPriceAnalyzer:
         action_map = {'①': 1, '②': 2, '③': 3, '④': 4}
         action_code = action_map[config['action_code']]
 
-        # v2.1 升级：根据趋势调整操作建议
-        if trend == TrendType.DOWNTREND and action_code == 2:
+        # v2.2 升级：根据市场环境、趋势、追高调整操作建议
+        if market_status == MarketStatus.BEAR and action_code == 2:
+            # 熊市环境中，禁止买入
+            action = '观望（熊市环境）'
+            action_code = 1
+        elif trend == TrendType.DOWNTREND and action_code == 2:
             # 下降趋势中，不建议买入
             action = '观望（下降趋势）'
             action_code = 1
-        elif is_chasing and action_code == 2:
-            # 追高状态，不建议买入
-            action = '观望（价格接近阻力位）'
+        elif is_chasing and action_code == 2 and trend != TrendType.UPTREND:
+            # v2.2 升级：非上升趋势追高，不建议买入（上升趋势允许追高）
+            action = '观望（价格接近阻力位，非上升趋势）'
             action_code = 1
         elif shares > 0 and cost > 0:
             # 如果是持仓状态，调整操作建议
@@ -502,6 +619,7 @@ class VolPriceAnalyzer:
             'position': position,
             'trend': trend.value,  # v2.1 升级
             'is_chasing': is_chasing,  # v2.1 升级
+            'market_status': market_status.value,  # v2.2 升级
             'buy_price': buy_price,
             'stop_loss_price': stop_loss,
             'target_price1': target1,  # 第一目标（20日）
@@ -524,7 +642,7 @@ class VolPriceAnalyzer:
             result: 分析结果字典
         """
         print("\n" + "=" * 50)
-        print("股票分析报告 v2.1 - 专业版")
+        print("股票分析报告 v2.2 - 专业版（市场环境过滤）")
         print("=" * 50)
         print(f"股票代码: {result['ts_code']}")
         print(f"股票名称: {result['stock_name']}")
@@ -541,21 +659,33 @@ class VolPriceAnalyzer:
         print(f"量价形态: {result['pattern']} - {result['pattern_name']}")
         print(f"所处位置: {result['position']}")
 
-        # v2.1 升级：显示趋势和追高判断
+        # v2.2 升级：显示市场环境、趋势和追高判断
         print("-" * 50)
-        print("趋势分析 (v2.1 新增):")
+        print("环境分析 (v2.2 新增):")
         print("-" * 50)
-        print(f"趋势状态: {result['trend']}")
 
+        # 市场环境显示
+        market_emoji = {
+            "牛市": "🐂",
+            "熊市": "🐻",
+            "震荡市": "↔️"
+        }
+        print(f"市场环境: {market_emoji.get(result['market_status'], '')} {result['market_status']}")
+
+        # 趋势显示
         trend_emoji = {
             "上升趋势": "📈",
             "下降趋势": "📉",
             "震荡整理": "↔️"
         }
-        print(f"  {trend_emoji.get(result['trend'], '')} {result['trend']}")
+        print(f"趋势状态: {trend_emoji.get(result['trend'], '')} {result['trend']}")
 
+        # 追高警告
         if result['is_chasing']:
-            print(f"⚠️  追高警告: 当前价格接近20日阻力位，不建议追高买入")
+            if result['trend'] == "上升趋势":
+                print(f"✓ 追高状态: 当前价格接近阻力位，但上升趋势允许追高")
+            else:
+                print(f"⚠️  追高警告: 当前价格接近20日阻力位，非上升趋势不建议追高买入")
         else:
             print(f"✓ 价格位置: 安全（未接近阻力位）")
 
@@ -569,7 +699,7 @@ class VolPriceAnalyzer:
         print("价格分析:")
         print("-" * 50)
         print(f"20日阻力位: {result['resistance']:.2f} 元")
-        print(f"60日支撑位: {result['support']:.2f} 元 (v2.1 升级)")
+        print(f"MA60支撑位: {result['support']:.2f} 元 (v2.2 升级)")
         print(f"ATR波动率: {result['atr']:.2f} 元")
 
         if result['shares'] > 0 and result['cost'] > 0:
