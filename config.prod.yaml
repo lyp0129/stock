@@ -1,0 +1,5 @@
+use_proxy: true
+http_proxy: "http://10.23.144.203:1080"
+
+# Tushare配置
+tushare_token: "2dc461bc1e6c2fff379f8a7d9e7397da5711996684e1693f0c6e869b5acb" 
