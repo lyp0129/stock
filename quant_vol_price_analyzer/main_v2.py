@@ -406,7 +406,8 @@ class VolPriceAnalyzer:
             return MarketStatus.NEUTRAL
 
     def calculate_target_prices(self, df: pd.DataFrame, position: str,
-                               action_code: int, pattern: str = '', trend: TrendType = TrendType.RANGE) -> Tuple[float, float, float, float, float, float, float, float]:
+                               action_code: int, pattern: str = '', trend: TrendType = TrendType.RANGE,
+                               current_price: float = None) -> Tuple[float, float, float, float, float, float, float, float]:
         """计算目标买入价、卖出价和止损价（专业版：分批止盈策略）
 
         策略说明：
@@ -424,6 +425,7 @@ class VolPriceAnalyzer:
             action_code: 操作代码（1=观望, 2=买入, 3=卖出, 4=空仓）
             pattern: 量价形态（用于判断是否强势）
             trend: 趋势类型
+            current_price: 实时价格（如果为None则使用日线收盘价）
 
         Returns:
             (买入价, 止损价, 目标价1, 目标价2, 目标价3, 阻力位, 支撑位, ATR)
@@ -440,7 +442,13 @@ class VolPriceAnalyzer:
         # v2.2 升级：支撑位改为MA60均线（更可靠，避免极端下影线）
         ma60 = df['close'].rolling(60).mean().iloc[-1]
         support = ma60 if not pd.isna(ma60) else recent_60['low'].min()
-        current_price = df.iloc[-1]['close']
+
+        # 使用传入的实时价格，如果没有则使用日线收盘价
+        if current_price is None:
+            current_price = df.iloc[-1]['close']
+
+        # 调试：确认使用的价格
+        # print(f"[calculate_target_prices] 使用价格: {current_price:.2f}")
 
         # 计算ATR（用于动态止损）
         atr = self._calculate_atr(df, 14)
@@ -467,24 +475,47 @@ class VolPriceAnalyzer:
         # 根据操作和位置调整止盈止损
         if action_code == 2:  # 买入
             buy_price = current_price
-            # v2.1 升级：根据趋势调整止损
-            # 优化2：使用min避免高位震荡时止损过高
+
+            # === 实盘级止损系统（最大回撤控制版）===
+            max_loss_pct = 0.12  # 最大亏损12%（硬底线）
+
+            # 1. 固定止损（硬底线）：永远不超过心理承受
+            fixed_stop = current_price * (1 - max_loss_pct)
+
+            # 2. 短期趋势止损（MA20）：防破位
+            ma20 = df['close'].rolling(20).mean().iloc[-1]
+            short_trend_stop = ma20 * 0.97 if not pd.isna(ma20) else fixed_stop
+
+            # 3. ATR止损（根据趋势调节）：适应波动
             if trend == TrendType.UPTREND:
-                # 上升趋势：宽松止损（ATR*2.5）
-                stop_loss = min(support * 0.97, current_price - atr * 2.5)
+                atr_stop = current_price - atr * 2.5
             elif trend == TrendType.DOWNTREND:
-                # 下降趋势：严格止损（ATR*1.5）
-                stop_loss = min(support * 0.98, current_price - atr * 1.5)
+                atr_stop = current_price - atr * 1.5
             else:
-                # 震荡：标准止损（ATR*2）
-                stop_loss = min(support * 0.97, current_price - atr * 2)
+                atr_stop = current_price - atr * 2
+
+            # === 最终止损（取最大值，保护资金）===
+            stop_loss = max(fixed_stop, short_trend_stop, atr_stop)
+            # print(f"[action_code=2] 固定:{fixed_stop:.2f} MA20:{short_trend_stop:.2f} ATR:{atr_stop:.2f} 最终:{stop_loss:.2f}")
+
             # 返回第一个目标价
             target = target1
+
         elif action_code == 3:  # 卖出/减仓（持有状态）
             buy_price = current_price
-            # 优化2：使用min避免高位震荡时止损过高
-            stop_loss = min(support * 0.97, current_price * 0.95, current_price - atr * 2)
+
+            # 持仓状态同样使用实盘级止损
+            max_loss_pct = 0.12
+            fixed_stop = current_price * (1 - max_loss_pct)
+
+            ma20 = df['close'].rolling(20).mean().iloc[-1]
+            short_trend_stop = ma20 * 0.97 if not pd.isna(ma20) else fixed_stop
+
+            atr_stop = current_price - atr * 2
+
+            stop_loss = max(fixed_stop, short_trend_stop, atr_stop)
             target = target1  # 第一目标价
+
         else:  # 观望/空仓
             if position == '低位':
                 buy_price = support * 1.02
@@ -597,7 +628,8 @@ class VolPriceAnalyzer:
             # 如果是持仓状态，调整操作建议
             if pattern in ['1B', '2B', '3B']:  # 可以继续持仓的情况
                 action = '持仓'
-                action_code = 1
+                # 保持原有的action_code（2B等强势形态保持为2，使用实盘级止损）
+                # 这样持仓状态也能享受新止损系统的保护
             elif pattern in ['1C', '2A', '2C']:  # 建议减仓的情况
                 action = '减仓'
                 action_code = 3
@@ -606,9 +638,9 @@ class VolPriceAnalyzer:
         else:
             action = config['action']
 
-        # 计算目标价格（使用分批止盈策略，传入趋势参数）
+        # 计算目标价格（使用分批止盈策略，传入趋势参数和实时价格）
         buy_price, stop_loss, target1, target2, target3, resistance, support, atr = self.calculate_target_prices(
-            df, position, action_code, pattern, trend
+            df, position, action_code, pattern, trend, current_price
         )
 
         # 计算持仓盈亏
@@ -749,13 +781,13 @@ class VolPriceAnalyzer:
             print(f"第三目标: {result['target_price3']:.2f} 元 (卖{sell3}股 → 剩{remain3}股底仓)")
             print(f"说明: 主升浪开启时仍保留{remain3}股底仓，避免错过大行情")
 
-            # v2.1 升级：根据趋势显示止损说明
-            if result['trend'] == "上升趋势":
-                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (ATR*2.5 - 宽松)")
-            elif result['trend'] == "下降趋势":
-                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (ATR*1.5 - 严格)")
+            # 实盘级止损系统说明
+            current_price = result.get('current_price', 0)
+            if current_price > 0:
+                loss_pct = ((current_price - result['stop_loss_price']) / current_price) * 100
+                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (最大回撤{loss_pct:.1f}% - 固定止损/MA20/ATR取最大)")
             else:
-                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (ATR*2 - 标准)")
+                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (固定止损/MA20/ATR取最大)")
         else:
             print("-" * 50)
             print("分批止盈策略 (按剩余仓位分批):")
@@ -765,13 +797,13 @@ class VolPriceAnalyzer:
             print(f"第三目标: {result['target_price3']:.2f} 元 (卖剩余20% → 剩28%底仓)")
             print(f"说明: 主升浪开启时仍保留28%底仓，避免错过大行情")
 
-            # v2.1 升级：根据趋势显示止损说明
-            if result['trend'] == "上升趋势":
-                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (ATR*2.5 - 宽松)")
-            elif result['trend'] == "下降趋势":
-                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (ATR*1.5 - 严格)")
+            # 实盘级止损系统说明
+            current_price = result.get('current_price', 0)
+            if current_price > 0:
+                loss_pct = ((current_price - result['stop_loss_price']) / current_price) * 100
+                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (最大回撤{loss_pct:.1f}% - 固定止损/MA20/ATR取最大)")
             else:
-                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (ATR*2 - 标准)")
+                print(f"建议止损: {result['stop_loss_price']:.2f} 元 (固定止损/MA20/ATR取最大)")
 
         print("=" * 50 + "\n")
 
