@@ -320,7 +320,7 @@ class VolPriceAnalyzer:
             return '中位'
 
     def analyze_trend(self, df: pd.DataFrame) -> TrendType:
-        """分析股票趋势（MA20/MA60/价格）
+        """分析股票趋势（MA20/MA60/价格）v2.3升级：缓冲带防抖动
 
         Args:
             df: 股票数据 DataFrame
@@ -335,11 +335,12 @@ class VolPriceAnalyzer:
         ma60 = df['close'].rolling(60).mean().iloc[-1]
         price = df.iloc[-1]['close']
 
-        # 上升趋势：价格 > MA20 > MA60
-        if price > ma20 > ma60:
+        # v2.3 升级：趋势缓冲带（1%阈值，避免边界反复横跳）
+        # 上升趋势：价格 > MA20*1.01 且 MA20 > MA60*1.01
+        if price > ma20 * 1.01 and ma20 > ma60 * 1.01:
             return TrendType.UPTREND
-        # 下降趋势：价格 < MA20 < MA60
-        elif price < ma20 < ma60:
+        # 下降趋势：价格 < MA20*0.99 且 MA20 < MA60*0.99
+        elif price < ma20 * 0.99 and ma20 < ma60 * 0.99:
             return TrendType.DOWNTREND
         # 震荡整理
         else:
@@ -625,16 +626,64 @@ class VolPriceAnalyzer:
             action = '观望（价格接近阻力位，非上升趋势）'
             action_code = 1
         elif shares > 0 and cost > 0:
-            # 如果是持仓状态，调整操作建议
-            if pattern in ['1B', '2B', '3B']:  # 可以继续持仓的情况
-                action = '持仓'
-                # 保持原有的action_code（2B等强势形态保持为2，使用实盘级止损）
-                # 这样持仓状态也能享受新止损系统的保护
-            elif pattern in ['1C', '2A', '2C']:  # 建议减仓的情况
-                action = '减仓'
+            # === 持仓逻辑：趋势 + 成本 + 止损（独立于短周期量价信号）===
+            # 核心原则：买点可以敏感，持仓必须迟钝
+
+            # 1. 计算盈亏比例
+            profit_pct = (current_price - cost) / cost
+
+            # 2. 强制止损（最优先，硬底线）
+            if current_price < cost * 0.88:
+                action = '止损（跌破12%）'
                 action_code = 3
-            else:
-                action = config['action']
+                must_sell = True  # 硬执行信号
+            # 3. 浮盈保护（赚了10%以上，跌破5日线就锁定利润）
+            elif profit_pct > 0.1 and len(df) >= 5:
+                ma5 = df['close'].rolling(5).mean().iloc[-1]
+                if current_price < ma5:
+                    action = '减仓（跌破5日线，保护利润）'
+                    action_code = 3
+                    must_sell = False
+                elif trend == TrendType.UPTREND:
+                    action = '持仓（趋势良好）'
+                    action_code = 2
+                    must_sell = False
+                elif trend == TrendType.DOWNTREND:
+                    action = '减仓（趋势走坏，锁定利润）'
+                    action_code = 3
+                    must_sell = False
+                else:
+                    action = '持仓（震荡但有厚利）'
+                    action_code = 2
+                    must_sell = False
+            # 4. 趋势判断（稳定，不会因短期波动乱跳）
+            elif trend == TrendType.UPTREND:
+                # 上升趋势：继续持仓
+                action = '持仓（趋势良好）'
+                action_code = 2
+                must_sell = False
+            elif trend == TrendType.RANGE:
+                # 震荡：看盈亏情况
+                if profit_pct > 0.05:
+                    action = '持仓（震荡但有利润）'
+                    action_code = 2
+                    must_sell = False
+                elif profit_pct < -0.05:
+                    action = '减仓（弱势震荡）'
+                    action_code = 3
+                    must_sell = False
+                else:
+                    action = '观察（震荡微盈亏）'
+                    action_code = 1
+                    must_sell = False
+            elif trend == TrendType.DOWNTREND:
+                # 下降趋势：根据盈亏决定
+                if profit_pct > 0:
+                    action = '减仓（趋势走坏，锁定利润）'
+                else:
+                    action = '减仓（趋势走坏）'
+                action_code = 3
+                must_sell = False
         else:
             action = config['action']
 
@@ -663,8 +712,10 @@ class VolPriceAnalyzer:
             'pattern': pattern,
             'pattern_name': config['name'],
             'action': action,
-            'action_code': config['action_code'],
+            'action_code': action_code,  # v2.3修复：返回逻辑值，不是符号
+            'action_code_symbol': config['action_code'],  # 保留符号用于显示
             'description': config['desc'],
+            'must_sell': must_sell if 'must_sell' in dir() else False,  # v2.3新增：硬执行信号
             'position': position,
             'trend': trend.value,  # v2.1 升级
             'is_chasing': is_chasing,  # v2.1 升级
